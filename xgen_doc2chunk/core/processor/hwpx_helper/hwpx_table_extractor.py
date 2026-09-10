@@ -54,7 +54,7 @@ HWPX Table XML Structure:
 import logging
 import traceback
 import xml.etree.ElementTree as ET
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from xgen_doc2chunk.core.functions.table_extractor import (
     BaseTableExtractor,
@@ -62,6 +62,7 @@ from xgen_doc2chunk.core.functions.table_extractor import (
     TableData,
     TableExtractorConfig,
 )
+from xgen_doc2chunk.core.functions.table_cell_image import merge_cell_image_tag
 from xgen_doc2chunk.core.processor.hwpx_helper.hwpx_constants import HWPX_NAMESPACES
 
 logger = logging.getLogger("document-processor")
@@ -101,12 +102,35 @@ class HWPXTableExtractor(BaseTableExtractor):
     
     def __init__(self, config: Optional[TableExtractorConfig] = None):
         """Initialize the HWPX table extractor.
-        
+
         Args:
             config: Table extraction configuration
         """
         super().__init__(config)
-    
+        # Optional image support - see configure_images()
+        self._image_resolver: Optional[Callable[[Any], str]] = None
+
+    def configure_images(
+        self,
+        image_resolver: Optional[Callable[[Any], str]]
+    ) -> None:
+        """Enable image extraction for table cells.
+
+        A cell may hold a picture (often a screenshot of text) instead of
+        typed text. Without this the picture is dropped and the cell renders
+        empty, with no image tag anywhere for OCR to pick up.
+
+        A resolver callback is used rather than the zip/bin-item plumbing so
+        this module stays free of section-parsing details.
+
+        When not configured, cell extraction behaves exactly as before.
+
+        Args:
+            image_resolver: pic element -> image tag string ("" when
+                unavailable). Pass None to restore the previous behaviour.
+        """
+        self._image_resolver = image_resolver
+
     def supports_format(self, format_type: str) -> bool:
         """Check if this extractor supports the given format.
         
@@ -421,8 +445,65 @@ class HWPXTableExtractor(BaseTableExtractor):
                 
                 if para_parts:
                     content_parts.append("".join(para_parts))
-        
-        return " ".join(content_parts).strip()
+
+        content = " ".join(content_parts).strip()
+
+        for tag in self._extract_cell_image_tags(tc):
+            content = merge_cell_image_tag(content, tag)
+
+        return content
+
+    def _collect_pic_elements(self, elem: ET.Element) -> List[ET.Element]:
+        """Find picture elements belonging to this cell.
+
+        Nested table subtrees are skipped: those cells are extracted by their
+        own recursive extract_table() call and would otherwise be tagged twice.
+
+        Args:
+            elem: Element to search under
+
+        Returns:
+            List of hp:pic / hc:pic elements
+        """
+        found: List[ET.Element] = []
+
+        for child in elem:
+            tag = child.tag.split('}')[-1] if '}' in child.tag else child.tag
+
+            if tag == 'tbl':
+                continue
+
+            if tag == 'pic':
+                found.append(child)
+            else:
+                found.extend(self._collect_pic_elements(child))
+
+        return found
+
+    def _extract_cell_image_tags(self, tc: ET.Element) -> List[str]:
+        """Resolve image tags for pictures placed inside a cell.
+
+        Args:
+            tc: <hp:tc> cell element
+
+        Returns:
+            List of image tag strings (may be empty)
+        """
+        if self._image_resolver is None:
+            return []
+
+        tags: List[str] = []
+
+        try:
+            for pic in self._collect_pic_elements(tc):
+                tag = self._image_resolver(pic)
+                if tag and tag.strip():
+                    tags.append(tag.strip())
+        except Exception as e:
+            # A cell image must never break table extraction
+            self.logger.warning(f"Failed to extract cell image: {e}")
+
+        return tags
     
     def _nested_table_to_text(self, table_data: TableData) -> str:
         """Convert a nested TableData to simple text representation.

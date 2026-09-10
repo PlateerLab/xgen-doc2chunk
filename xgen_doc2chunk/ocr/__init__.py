@@ -53,6 +53,11 @@ from xgen_doc2chunk.ocr.ocr_processor import (
     _b64_from_file,
     _get_mime_type,
 )
+from xgen_doc2chunk.ocr.table_cell_ocr import (
+    TableCellIndex,
+    replace_image_tags,
+    sanitize_ocr_text_for_table_cell,
+)
 
 __all__ = [
     # Base Class
@@ -70,5 +75,9 @@ __all__ = [
     "convert_image_to_text_with_llm",
     "process_text_with_ocr",
     "process_text_with_ocr_progress",
+    # Table cell aware replacement
+    "TableCellIndex",
+    "replace_image_tags",
+    "sanitize_ocr_text_for_table_cell",
 ]
 

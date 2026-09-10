@@ -28,6 +28,10 @@ from xgen_doc2chunk.core.processor.pdf_helpers.pdf_cell_analysis import CellAnal
 from xgen_doc2chunk.core.processor.pdf_helpers.pdf_text_quality_analyzer import (
     apply_cjk_compat_mapping,
 )
+from xgen_doc2chunk.core.processor.pdf_helpers.pdf_cell_image import (
+    attach_cell_images_to_candidate,
+)
+from xgen_doc2chunk.core.functions.table_cell_image import CellImageConfig
 
 logger = logging.getLogger("document-processor")
 
@@ -69,7 +73,10 @@ def extract_all_tables(
     doc,
     file_path: str,
     detect_page_border_func,
-    is_table_likely_border_func
+    is_table_likely_border_func,
+    image_processor=None,
+    cell_image_xrefs: Optional[Set[int]] = None,
+    cell_image_config: Optional[CellImageConfig] = None
 ) -> Dict[int, List[PageElement]]:
     """
     Extracts tables from entire document.
@@ -86,6 +93,11 @@ def extract_all_tables(
         file_path: PDF file path
         detect_page_border_func: Function to detect page borders
         is_table_likely_border_func: Function to check if table is a border
+        image_processor: Optional image processor. When given, cells holding an
+            image instead of text receive an image tag so OCR can read them.
+        cell_image_xrefs: Optional set updated with xrefs consumed as cell
+            content (informational; kept apart from the document image pass)
+        cell_image_config: Optional cell image thresholds
 
     Returns:
         Dictionary mapping page numbers to list of table PageElements
@@ -113,6 +125,24 @@ def extract_all_tables(
                 ):
                     logger.debug(f"[PDF] Skipping page border table: {candidate.bbox}")
                     continue
+
+                # Put an image tag into cells whose content is an image rather
+                # than text. Done here because cell indices are final at this
+                # point (narrow-column merging / header-data merging applied)
+                # and the page coordinates are still page-local.
+                if image_processor is not None:
+                    try:
+                        attach_cell_images_to_candidate(
+                            page,
+                            candidate,
+                            image_processor,
+                            cell_image_xrefs=cell_image_xrefs,
+                            config=cell_image_config,
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            f"[PDF] Cell image attachment failed on page {page_num + 1}: {e}"
+                        )
 
                 # Convert cell info to dictionary
                 cells_info = None

@@ -65,6 +65,9 @@ from xgen_doc2chunk.core.functions.table_extractor import (
     TableExtractorConfig,
 )
 from xgen_doc2chunk.core.processor.docx_helper.docx_constants import NAMESPACES
+from xgen_doc2chunk.core.functions.table_cell_image import merge_cell_image_tag
+
+MC_FALLBACK_TAG = '{%s}Fallback' % NAMESPACES['mc']
 
 logger = logging.getLogger("document-processor")
 
@@ -101,12 +104,36 @@ class DOCXTableExtractor(BaseTableExtractor):
     
     def __init__(self, config: Optional[TableExtractorConfig] = None):
         """Initialize the DOCX table extractor.
-        
+
         Args:
             config: Table extraction configuration
         """
         super().__init__(config)
-    
+        # Optional image support - see configure_images()
+        self._image_processor: Optional[Any] = None
+        self._processed_images: Optional[set] = None
+
+    def configure_images(
+        self,
+        image_processor: Optional[Any],
+        processed_images: Optional[set] = None
+    ) -> None:
+        """Enable image extraction for table cells.
+
+        A cell may contain an image (typically a screenshot of text) instead of
+        typed text. Without this the image is dropped and the cell renders
+        empty, with no image tag anywhere for OCR to pick up.
+
+        When not configured, cell extraction behaves exactly as before.
+
+        Args:
+            image_processor: DOCXImageProcessor instance
+            processed_images: Shared dedup set from the handler, so an image
+                is not emitted both inline and inside a cell
+        """
+        self._image_processor = image_processor
+        self._processed_images = processed_images if processed_images is not None else set()
+
     def supports_format(self, format_type: str) -> bool:
         """Check if this extractor supports the given format.
         
@@ -225,8 +252,9 @@ class DOCXTableExtractor(BaseTableExtractor):
                     # Get rowspan from pre-calculated map
                     rowspan = rowspan_map.get((row_idx, start_col), 1)
                     
-                    # Extract cell content
-                    content = self._extract_cell_text(cell)
+                    # Extract cell content (context is the Document, needed to
+                    # resolve image relationships when image support is on)
+                    content = self._extract_cell_text(cell, context)
                     
                     # Create TableCell
                     table_cell = TableCell(
@@ -484,17 +512,22 @@ class DOCXTableExtractor(BaseTableExtractor):
         
         return rowspan_map, cell_grid_col
     
-    def _extract_cell_text(self, cell_elem: Any) -> str:
-        """Extract text content from a cell element.
-        
+    def _extract_cell_text(self, cell_elem: Any, doc: Any = None) -> str:
+        """Extract content from a cell element.
+
+        Text is collected as before. When image support has been enabled via
+        configure_images(), any image/shape/diagram inside the cell also
+        contributes an inline tag so OCR can read it in place.
+
         Args:
             cell_elem: Cell XML element
-            
+            doc: python-docx Document, required to resolve image relationships
+
         Returns:
-            Cell text content
+            Cell content
         """
         texts = []
-        
+
         for p in cell_elem.findall('.//w:p', NAMESPACES):
             p_texts = []
             for t in p.findall('.//w:t', NAMESPACES):
@@ -502,8 +535,80 @@ class DOCXTableExtractor(BaseTableExtractor):
                     p_texts.append(t.text)
             if p_texts:
                 texts.append(''.join(p_texts))
-        
-        return '\n'.join(texts)
+
+        content = '\n'.join(texts)
+
+        for tag in self._extract_cell_image_tags(cell_elem, doc):
+            content = merge_cell_image_tag(content, tag)
+
+        return content
+
+    @staticmethod
+    def _is_in_mc_fallback(elem: Any) -> bool:
+        """True when the element sits in an mc:Fallback branch.
+
+        AlternateContent stores the same graphic twice (modern Choice, legacy
+        Fallback). Only the Choice branch is used, otherwise a single image
+        would produce two tags in one cell.
+        """
+        parent = elem.getparent() if hasattr(elem, 'getparent') else None
+        while parent is not None:
+            if parent.tag == MC_FALLBACK_TAG:
+                return True
+            parent = parent.getparent() if hasattr(parent, 'getparent') else None
+        return False
+
+    def _extract_cell_image_tags(self, cell_elem: Any, doc: Any) -> List[str]:
+        """Collect image tags for every graphic inside a cell.
+
+        Charts are intentionally not resolved here: chart content is consumed
+        from a document-ordered queue in the handler, and pulling from it out
+        of order would misalign the remaining charts.
+
+        Args:
+            cell_elem: Cell XML element
+            doc: python-docx Document object
+
+        Returns:
+            List of image tag strings (may be empty)
+        """
+        if self._image_processor is None or doc is None:
+            return []
+
+        processed = self._processed_images
+        if processed is None:
+            processed = set()
+
+        tags: List[str] = []
+
+        try:
+            for drawing in cell_elem.findall('.//w:drawing', NAMESPACES):
+                if self._is_in_mc_fallback(drawing):
+                    continue
+                if not hasattr(self._image_processor, 'process_drawing_element'):
+                    break
+                content, _elem_type = self._image_processor.process_drawing_element(
+                    drawing, doc, processed, chart_callback=None
+                )
+                if content and content.strip():
+                    tags.append(content.strip())
+
+            for pict in cell_elem.findall('.//w:pict', NAMESPACES):
+                if self._is_in_mc_fallback(pict):
+                    continue
+                if not hasattr(self._image_processor, 'extract_from_pict'):
+                    break
+                content, _elem_type = self._image_processor.extract_from_pict(
+                    pict, doc, processed
+                )
+                if content and content.strip():
+                    tags.append(content.strip())
+
+        except Exception as e:
+            # A cell image must never break table extraction
+            self.logger.warning(f"Failed to extract cell image: {e}")
+
+        return tags
 
 
 # Factory function

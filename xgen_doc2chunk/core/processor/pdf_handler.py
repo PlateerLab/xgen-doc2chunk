@@ -239,6 +239,10 @@ class PDFHandler(BaseHandler):
 
             all_pages_text = []
             processed_images: Set[int] = set()
+            # Images consumed as table cell content. Tracked separately from
+            # processed_images so the document-level image pass keeps its
+            # current behaviour for placements outside tables.
+            cell_image_xrefs: Set[int] = set()
 
             # Extract metadata
             if extract_metadata:
@@ -248,7 +252,7 @@ class PDFHandler(BaseHandler):
 
             # Extract all document tables
             # NOTE: file_path is passed for pdfplumber compatibility
-            all_tables = self._extract_all_tables(doc, file_path)
+            all_tables = self._extract_all_tables(doc, file_path, cell_image_xrefs)
 
             # Process each page
             for page_num in range(len(doc)):
@@ -547,9 +551,26 @@ class PDFHandler(BaseHandler):
 
         return merge_page_elements(page_elements)
 
-    def _extract_all_tables(self, doc, file_path: str) -> Dict[int, List[PageElement]]:
-        """Extract tables from entire document."""
-        return extract_all_tables(doc, file_path, detect_page_border, is_table_likely_border)
+    def _extract_all_tables(
+        self,
+        doc,
+        file_path: str,
+        cell_image_xrefs: Optional[Set[int]] = None
+    ) -> Dict[int, List[PageElement]]:
+        """Extract tables from entire document.
+
+        The image processor is handed over so that table cells containing an
+        image instead of text get an inline image tag, making them visible to
+        the OCR pass. Cells that already hold text are untouched.
+        """
+        return extract_all_tables(
+            doc,
+            file_path,
+            detect_page_border,
+            is_table_likely_border,
+            image_processor=self.format_image_processor,
+            cell_image_xrefs=cell_image_xrefs,
+        )
 
     def _extract_images_from_page(
         self, page, page_num: int, doc, processed_images: Set[int],

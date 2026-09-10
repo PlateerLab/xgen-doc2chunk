@@ -50,23 +50,52 @@ def _get_table_processor() -> HWPXTableProcessor:
     return _table_processor
 
 
-def _process_table(table_element: ET.Element, ns: Dict[str, str]) -> str:
+def _process_table(
+    table_element: ET.Element,
+    ns: Dict[str, str],
+    zf: zipfile.ZipFile = None,
+    bin_item_map: Dict[str, str] = None,
+    processed_images: Set[str] = None,
+    image_processor: ImageProcessor = None,
+) -> str:
     """Process a table element and return formatted output.
     
     Uses HWPXTableExtractor to convert XML to TableData,
     then HWPXTableProcessor to format as HTML.
     
+    Cells holding a picture instead of text get an inline image tag so the
+    OCR pass can read them in place. Without the zip/bin-item context the
+    extractor falls back to its previous text-only behaviour.
+
     Args:
         table_element: hp:tbl XML element
         ns: Namespace dictionary
-        
+        zf: HWPX ZipFile, required to read image binaries
+        bin_item_map: BinItem ID -> path mapping
+        processed_images: Shared dedup set of already emitted image paths
+        image_processor: Image processor used to save cell images
+
     Returns:
         Formatted table string (HTML)
     """
     extractor = _get_table_extractor()
     processor = _get_table_processor()
-    
-    table_data = extractor.extract_table(table_element, ns)
+
+    if zf is not None and bin_item_map and image_processor is not None:
+        def _resolve_cell_image(pic_elem: ET.Element) -> str:
+            return _process_inline_image(
+                pic_elem, zf, bin_item_map, processed_images, image_processor
+            )
+        extractor.configure_images(_resolve_cell_image)
+    else:
+        extractor.configure_images(None)
+
+    try:
+        table_data = extractor.extract_table(table_element, ns)
+    finally:
+        # Leave the shared extractor in its default state
+        extractor.configure_images(None)
+
     if table_data:
         return processor.format_table(table_data)
     return ""
@@ -185,7 +214,9 @@ def _process_run(
                 parts.append(child.text)
 
         elif tag == 'tbl':
-            table_html = _process_table(child, ns)
+            table_html = _process_table(
+                child, ns, zf, bin_item_map, processed_images, image_processor
+            )
             if table_html:
                 parts.append(f"\n{table_html}\n")
 
@@ -248,7 +279,9 @@ def _process_ctrl(
         tag = _local_tag(child)
 
         if tag == 'tbl':
-            table_html = _process_table(child, ns)
+            table_html = _process_table(
+                child, ns, zf, bin_item_map, processed_images, image_processor
+            )
             if table_html:
                 parts.append(f"\n{table_html}\n")
 
