@@ -6,6 +6,8 @@ import logging
 import os
 from typing import Any, Callable, Dict, List, Optional, Pattern
 
+from xgen_doc2chunk.ocr.table_cell_ocr import replace_image_tags
+
 logger = logging.getLogger("ocr-processor")
 
 # Default image tag pattern: [Image:{path}] or [image:{path}] (case-insensitive)
@@ -237,19 +239,14 @@ def process_text_with_ocr(
 
     logger.info(f"[OCR] Detected {len(image_paths)} image tags")
 
-    result_text = text
-
-    for img_path in image_paths:
-        # Case-insensitive tag matching
-        tag_pattern = re.compile(r'\[[Ii]mage:' + re.escape(img_path) + r'\]')
-
+    def _resolve(img_path: str) -> Optional[str]:
         # Load image from local path
         local_path = load_image_from_path(img_path)
 
         if local_path is None:
             # Keep original tag on load failure
             logger.warning(f"[OCR] Image load failed, keeping original tag: {img_path}")
-            continue
+            return None
 
         # Convert image to text using VL model
         ocr_result = convert_image_to_text_with_llm(
@@ -261,13 +258,14 @@ def process_text_with_ocr(
         # Keep original tag on OCR failure (None or error message)
         if ocr_result is None or ocr_result.startswith("[Image conversion error:"):
             logger.warning(f"[OCR] Image conversion failed, keeping original tag: {img_path}")
-            continue
+            return None
 
-        # Replace tag with OCR result
-        result_text = tag_pattern.sub(ocr_result, result_text)
         logger.info(f"[OCR] Tag replacement completed: {img_path[:50]}...")
+        return ocr_result
 
-    return result_text
+    # Tags inside an HTML table cell get flattened so the cell markup survives;
+    # everything else is replaced verbatim.
+    return replace_image_tags(text, DEFAULT_IMAGE_TAG_PATTERN, _resolve)
 
 
 def process_text_with_ocr_progress(
@@ -302,9 +300,25 @@ def process_text_with_ocr_progress(
     total_chunks = len(image_paths)
     logger.info(f"[OCR] Detected {total_chunks} image tags")
 
-    result_text = text
+    # Conversion result per distinct image path (None = keep original tag).
+    # Progress events are still emitted once per tag occurrence so the reported
+    # totals stay identical to previous behaviour.
+    resolved: Dict[str, Optional[str]] = {}
     success_count = 0
     failed_count = 0
+
+    def _emit(idx: int, status: str, error: Optional[str] = None) -> None:
+        if not progress_callback:
+            return
+        event = {
+            'event': 'ocr_chunk_processed',
+            'chunk_index': idx,
+            'total_chunks': total_chunks,
+            'status': status,
+        }
+        if error is not None:
+            event['error'] = error
+        progress_callback(event)
 
     for idx, img_path in enumerate(image_paths):
         # Progress callback - processing started
@@ -316,8 +330,15 @@ def process_text_with_ocr_progress(
                 'image_path': img_path
             })
 
-        # Case-insensitive tag matching
-        tag_pattern = re.compile(r'\[[Ii]mage:' + re.escape(img_path) + r'\]')
+        # Same image referenced by more than one tag - reuse the conversion
+        if img_path in resolved:
+            if resolved[img_path] is None:
+                failed_count += 1
+                _emit(idx, 'failed', f'Previously failed: {img_path}')
+            else:
+                success_count += 1
+                _emit(idx, 'success')
+            continue
 
         # Load image from local path
         local_path = load_image_from_path(img_path)
@@ -325,15 +346,9 @@ def process_text_with_ocr_progress(
         if local_path is None:
             # Keep original tag on load failure
             logger.warning(f"[OCR] Image load failed, keeping original tag: {img_path}")
+            resolved[img_path] = None
             failed_count += 1
-            if progress_callback:
-                progress_callback({
-                    'event': 'ocr_chunk_processed',
-                    'chunk_index': idx,
-                    'total_chunks': total_chunks,
-                    'status': 'failed',
-                    'error': f'Load failed: {img_path}'
-                })
+            _emit(idx, 'failed', f'Load failed: {img_path}')
             continue
 
         try:
@@ -347,41 +362,24 @@ def process_text_with_ocr_progress(
             # Keep original tag on OCR failure (None or error message)
             if ocr_result is None or ocr_result.startswith("[Image conversion error:"):
                 logger.warning(f"[OCR] Image conversion failed, keeping original tag: {img_path}")
+                resolved[img_path] = None
                 failed_count += 1
-                if progress_callback:
-                    progress_callback({
-                        'event': 'ocr_chunk_processed',
-                        'chunk_index': idx,
-                        'total_chunks': total_chunks,
-                        'status': 'failed',
-                        'error': ocr_result or 'OCR returned None'
-                    })
+                _emit(idx, 'failed', ocr_result or 'OCR returned None')
                 continue
 
-            # Replace tag with OCR result
-            result_text = tag_pattern.sub(ocr_result, result_text)
+            resolved[img_path] = ocr_result
             success_count += 1
             logger.info(f"[OCR] Tag replacement completed: {img_path[:50]}...")
-
-            if progress_callback:
-                progress_callback({
-                    'event': 'ocr_chunk_processed',
-                    'chunk_index': idx,
-                    'total_chunks': total_chunks,
-                    'status': 'success'
-                })
+            _emit(idx, 'success')
 
         except Exception as e:
             logger.error(f"[OCR] Image processing error: {img_path}, error: {e}")
+            resolved[img_path] = None
             failed_count += 1
-            if progress_callback:
-                progress_callback({
-                    'event': 'ocr_chunk_processed',
-                    'chunk_index': idx,
-                    'total_chunks': total_chunks,
-                    'status': 'failed',
-                    'error': str(e)
-                })
+            _emit(idx, 'failed', str(e))
 
-    return result_text
+    # Single context-aware pass: tags inside an HTML table cell are flattened.
+    return replace_image_tags(
+        text, DEFAULT_IMAGE_TAG_PATTERN, lambda p: resolved.get(p)
+    )
 

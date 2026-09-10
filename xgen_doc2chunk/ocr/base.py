@@ -159,6 +159,7 @@ class BaseOCR(ABC):
             load_image_from_path,
             DEFAULT_IMAGE_TAG_PATTERN,
         )
+        from xgen_doc2chunk.ocr.table_cell_ocr import replace_image_tags
 
         if not self.llm_client:
             logger.warning(f"[{self.provider.upper()}] Skipping OCR processing: no LLM client")
@@ -175,34 +176,25 @@ class BaseOCR(ABC):
 
         logger.info(f"[{self.provider.upper()}] Detected {len(image_paths)} image tags")
 
-        result_text = text
-
-        for img_path in image_paths:
-            # Build replacement pattern using the same pattern structure
-            # Escape the path and create a pattern that matches the full tag
-            escaped_path = re.escape(img_path)
-            # Get the pattern string and replace capture group with escaped path
-            pattern_str = pattern.pattern
-            # Replace the capture group (.*), ([^...]+), etc. with the escaped path
-            tag_pattern_str = re.sub(r'\([^)]+\)', escaped_path, pattern_str, count=1)
-            tag_pattern = re.compile(tag_pattern_str)
-
+        def _resolve(img_path: str) -> Optional[str]:
             local_path = load_image_from_path(img_path)
 
             if local_path is None:
                 logger.warning(f"[{self.provider.upper()}] Image load failed, keeping original tag: {img_path}")
-                continue
+                return None
 
             ocr_result = self.convert_image_to_text(local_path)
 
             if ocr_result is None or ocr_result.startswith("[Image conversion error:"):
                 logger.warning(f"[{self.provider.upper()}] Image conversion failed, keeping original tag: {img_path}")
-                continue
+                return None
 
-            result_text = tag_pattern.sub(ocr_result, result_text)
             logger.info(f"[{self.provider.upper()}] Tag replacement completed: {img_path[:50]}...")
+            return ocr_result
 
-        return result_text
+        # Replaces each tag literally (no regex escape issues) and flattens
+        # results that land inside an HTML table cell so the markup survives.
+        return replace_image_tags(text, pattern, _resolve)
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(provider='{self.provider}')"

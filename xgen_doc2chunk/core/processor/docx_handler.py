@@ -289,6 +289,12 @@ class DOCXHandler(BaseHandler):
             total_images = 0
             total_charts = 0
 
+            # Let table cells emit image tags for images embedded in them.
+            # Shares processed_images so an image is never tagged twice.
+            self.table_extractor.configure_images(
+                self.format_image_processor, processed_images
+            )
+
             # Pre-extract all charts using ChartExtractor
             file_stream = self.get_file_stream(current_file)
             chart_data_list = self.chart_extractor.extract_all_from_file(file_stream)

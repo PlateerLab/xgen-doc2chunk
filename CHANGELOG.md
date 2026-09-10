@@ -5,6 +5,60 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.6] - 2026-09-10
+
+### Fixed
+- **PDF/DOCX/HWPX**: An image placed inside a table cell (typically a screenshot of
+  text pasted into the cell) was dropped entirely. The cell extracted as empty **and**
+  no `[Image:...]` tag was produced anywhere, so the OCR pass never saw the content -
+  it was unrecoverable regardless of which OCR model was configured. Such a cell now
+  receives an inline image tag at its own position, so OCR replaces it in place and
+  the text lands in the correct `<td>`.
+  - PDF: images were excluded by the table-bbox filter in
+    `pdf_image_processor.extract_images_from_page()` (70% overlap rule) and the
+    document-level size filters (`min_image_size=50`, `min_image_area=2500`) discarded
+    cell-sized images.
+  - DOCX: `DOCXTableExtractor._extract_cell_text()` read `w:t` only, ignoring
+    `w:drawing` / `w:pict`.
+  - HWPX: `hwpx_section._process_table()` did not pass the zip / BinItem context to
+    the extractor, so `hp:pic` inside `hp:tc` could not be resolved.
+- **OCR**: `process_text_with_ocr()`, `process_text_with_ocr_progress()` and
+  `BaseOCR.process_text()` passed the model output straight to `re.sub()` as the
+  *replacement* string, so backslashes and group references (`\1`, `\g<name>`) in the
+  output were interpreted - corrupting the text or raising `re.error`. Replacement is
+  now literal.
+
+### Added
+- `xgen_doc2chunk/ocr/table_cell_ocr.py`: table-cell aware tag replacement.
+  `replace_image_tags()` resolves each distinct image once, keeps the original tag on
+  failure, and flattens output that lands inside a `<td>`/`<th>` via
+  `sanitize_ocr_text_for_table_cell()` - the default OCR prompt asks the VL model for
+  HTML tables, which would otherwise break `chunking/table_parser.py`.
+- `xgen_doc2chunk/core/functions/table_cell_image.py`: shared `CellImageConfig`,
+  `merge_cell_image_tag()` and `match_images_to_cells()` used by the format extractors.
+  `min_cell_coverage` (default 0.25) separates content from decoration: a screenshot
+  pasted as cell content fills most of its cell, while a checkbox or bullet icon covers
+  a few percent of it. Pixel size alone cannot tell them apart, so coverage is the
+  gate - without it, 16x16 icons in a calendar table would each trigger a VL model call.
+- `xgen_doc2chunk/core/processor/pdf_helpers/pdf_cell_image.py`: matches image
+  placements to the table cell containing them.
+- `DOCXTableExtractor.configure_images()` and `HWPXTableExtractor.configure_images()`
+  enable cell image extraction; without them both extractors behave exactly as before.
+
+### Compatibility
+- Only cells that extract as **empty** receive a tag (`only_empty_cells`), so tables
+  that already extract correctly follow the identical code path as 0.3.5.
+- The document-level image pass is unchanged, including the PDF table-bbox exclusion,
+  so an image outside a table is still emitted exactly as before and is never tagged
+  twice. Dedup sets are shared with the handlers.
+- OCR output *outside* a table cell is inserted verbatim as before; flattening applies
+  only inside a cell.
+- Charts inside DOCX cells are deliberately not resolved: chart content is consumed
+  from a document-ordered queue and pulling from it out of order would misalign the
+  remaining charts.
+- HWP already routed cell content through the image-aware traversal callback, and
+  XLSX/XLS already emitted image tags at sheet level, so neither format is changed.
+
 ## [0.3.5] - 2026-09-01
 
 ### Fixed
