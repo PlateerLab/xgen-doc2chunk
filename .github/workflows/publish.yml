@@ -84,6 +84,10 @@ jobs:
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         # No token needed with Trusted Publisher!
+        # 양쪽 저장소(master0419 / PlateerLab)가 deploy 를 서로 동기화하므로 같은 버전이
+        # 두 번 빌드된다. 먼저 올라간 쪽이 이기고 나머지는 skip.
+        with:
+          skip-existing: true
       
       - name: Summary
         run: |
