@@ -279,3 +279,13 @@ Apache License 2.0 — see [LICENSE](LICENSE) for details.
 ## Contributing
 
 Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+### Repositories
+
+This project is maintained in two mirrored repositories that are kept in sync automatically
+by `.github/workflows/sync.yml` (`main` and `deploy` branches):
+
+- https://github.com/master0419/xgen_doc2chunk
+- https://github.com/PlateerLab/xgen-doc2chunk
+
+You can open a branch or PR against either one; merged changes propagate to the other.
