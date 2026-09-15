@@ -32,6 +32,9 @@ jobs:
         if: steps.target.outputs.repo != ''
         with:
           fetch-depth: 0
+          # checkout 이 남기는 GITHUB_TOKEN 인증 헤더가 URL 의 PAT 보다 우선 적용되어
+          # github-actions[bot] 으로 push 하게 된다. 반드시 끈다.
+          persist-credentials: false
 
       - name: Push ${{ github.ref_name }} to ${{ steps.target.outputs.repo }}
         if: steps.target.outputs.repo != ''
