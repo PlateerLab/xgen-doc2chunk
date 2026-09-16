@@ -22,6 +22,8 @@
   - Extracts and processes inline images
   - Header/footer extraction for DOC, DOCX, HWPX
   - Chart and diagram extraction from Office documents
+  - Reads ISO 29500 **Strict** OOXML (Word's "Strict Open XML Document") and
+    repairs packages with missing or broken root relationships
 
 - **OCR Integration**:
   - Pluggable OCR engine architecture

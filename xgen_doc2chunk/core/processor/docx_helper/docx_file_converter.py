@@ -39,13 +39,15 @@ class DOCXFileConverter(BaseFileConverter):
             docx.Document object
             
         Raises:
-            Exception: If DOCX cannot be opened
+            Exception: If DOCX cannot be opened and cannot be repaired
         """
-        from docx import Document
-        
-        stream = file_stream if file_stream is not None else BytesIO(file_data)
-        stream.seek(0)
-        return Document(stream)
+        from xgen_doc2chunk.core.functions.ooxml_repair import open_docx_document
+
+        # open_docx_document() opens the package normally first and only rebuilds
+        # it when that raised, so a well-formed DOCX takes the same path as before.
+        if file_stream is not None:
+            return open_docx_document(file_stream=file_stream)
+        return open_docx_document(file_data)
     
     def get_format_name(self) -> str:
         """Return format name."""

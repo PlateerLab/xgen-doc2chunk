@@ -5,6 +5,70 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.7] - 2026-09-16
+
+### Fixed
+- **DOCX**: A document that python-docx could not open was indexed as a chunk whose
+  *content* was the error message itself -
+  `[DOCX file processing failed: no relationship of type '...officeDocument' in collection]`.
+  The upload reported success, and the error string then surfaced in search results.
+  `DOCXHandler._extract_docx_simple_text()` now raises `RuntimeError` instead of
+  returning that marker, matching `_extract_simple_text_fallback()`, which has always
+  raised. The message carries a diagnosis rather than the raw exception.
+  **Behaviour change**: a DOCX that cannot be extracted now fails the upload instead of
+  silently indexing its own failure.
+- **DOCX**: Three unrelated file states produced that one identical message, so the
+  symptom never identified the cause. All three are now read correctly:
+  - **ISO 29500 Strict** packages - Word's "Strict Open XML Document" save option,
+    mandated by some public-sector document policies. Strict is a standard, not a
+    malformed file; python-docx simply only knows the Transitional namespaces.
+  - **Missing `_rels/.rels`** - an incomplete package from a third-party generator or
+    a truncated transfer.
+  - **Missing or dangling `officeDocument` relationship** - root relationships that do
+    not point at a part present in the package.
+  In each case `word/document.xml` is intact and only the package wiring is unreadable.
+  Verified against all three, plus a main part typed as `application/xml`: every one now
+  extracts byte-identical text and tables to the healthy original.
+
+### Added
+- `xgen_doc2chunk/core/functions/ooxml_repair.py`: rebuilds an unreadable OOXML package
+  **in memory** - the input bytes are never modified - and hands the reader a package it
+  can open.
+  - `open_docx_document()` opens normally first and repairs only after that raised, so a
+    file that reads correctly today follows the identical code path as in 0.3.6. Wired
+    into `DOCXFileConverter.convert()`, `DOCXHandler.extract_text_fast()` and
+    `DOCFileConverter._convert_docx()`.
+  - `diagnose_ooxml_package()` / `describe_ooxml_failure()` name the cause
+    (`strict`, `missing_root_rels`, `dangling_office_relationship`, `ole2`,
+    `no_main_part`, ...) instead of leaving one message to mean five things.
+  - `python -m xgen_doc2chunk.core.functions.ooxml_repair <file>` reports that diagnosis
+    from the command line for support triage.
+- Strict -> Transitional mapping covering 104 namespace and relationship-type pairs,
+  taken verbatim from the Microsoft Open XML SDK (`OpenXmlNamespaceResolver`) rather
+  than derived by hand. A missing pair does not fail loudly - it silently drops the
+  content that uses it - so anything left unmapped after a rewrite is reported through
+  `OoxmlDiagnosis.unmapped_strict_uris` and logged as a warning.
+  Verified by round-tripping every XML part of a real document Transitional -> Strict ->
+  Transitional: zero byte differences, zero unmapped URIs.
+- Pre-release Office 2007 namespaces (`wordprocessingml/2006/3/main` and siblings) are
+  mapped as well; they break the same reader in the same way.
+
+### Compatibility
+- Strict is a *subset* of Transitional, so mapping in this direction cannot lose
+  constructs. The reverse direction is unsafe and is not attempted.
+- Repair runs only after a normal open has raised, so no file that works in 0.3.6 takes
+  a different path in 0.3.7.
+- Relationship-type substitution is ordered longest-key-first. This is required, not
+  cosmetic: `.../officeDocument/relationships` is a prefix of every relationship type,
+  and `extendedProperties` / `customProperties` map to the hyphenated
+  `extended-properties` / `custom-properties`, which prefix replacement would get wrong.
+- Packages that are genuinely something else - an XLSX or PPTX renamed to `.docx`, a
+  legacy OLE2 `.doc`, a ZIP with no main part - are not "repaired" into nonsense. They
+  raise with a message naming what the file actually is.
+- Only the DOCX read paths are wired up. `ooxml_repair` itself is format-agnostic and
+  already recognises `xl/workbook.xml` and `ppt/presentation.xml`, but the XLSX and PPTX
+  handlers are untouched in this release.
+
 ## [0.3.6] - 2026-09-10
 
 ### Fixed
