@@ -133,8 +133,8 @@ class DOCFileConverter(BaseFileConverter):
 
     def _convert_docx(self, file_data: bytes) -> Any:
         """Convert misnamed DOCX data."""
-        from docx import Document
-        return Document(BytesIO(file_data))
+        from xgen_doc2chunk.core.functions.ooxml_repair import open_docx_document
+        return open_docx_document(file_data)
 
     def get_format_name(self) -> str:
         """Return detected format name."""

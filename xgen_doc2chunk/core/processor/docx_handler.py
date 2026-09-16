@@ -15,9 +15,12 @@ Image OCR is performed in a separate post-processing step.
 
 Fallback Chain:
 1. Enhanced DOCX processing (python-docx with BytesIO stream)
-2. DOCHandler fallback (for non-ZIP files: RTF, OLE, HTML, etc.)
-3. Simple text extraction
-4. Error message
+2. Package repair, then retry - for ISO 29500 Strict packages and for packages
+   whose root relationships are missing or broken (see functions.ooxml_repair)
+3. DOCHandler fallback (for non-ZIP files: RTF, OLE, HTML, etc.)
+4. Simple text extraction
+5. RuntimeError - extraction failures are raised, never returned as text, so a
+   failed document is not indexed as a chunk containing its own error message
 
 Class-based Handler:
 - DOCXHandler class inherits from BaseHandler to manage config/image_processor
@@ -170,9 +173,12 @@ class DOCXHandler(BaseHandler):
         self.logger.info(f"[DOCX fast] Plain text extraction: {file_path}")
 
         try:
-            import io as _io
-            from docx import Document  # python-docx
-            doc = Document(_io.BytesIO(file_data))
+            # Imported here rather than at module scope: a top-level import would
+            # pull ooxml_repair in through the package chain and make
+            # `python -m ...ooxml_repair` re-execute an already-imported module.
+            from xgen_doc2chunk.core.functions.ooxml_repair import open_docx_document
+
+            doc = open_docx_document(file_data)
             paragraphs = []
             for para in doc.paragraphs:
                 txt = (para.text or "").strip()
@@ -530,8 +536,19 @@ class DOCXHandler(BaseHandler):
             return "\n".join(result_parts)
 
         except Exception as e:
-            self.logger.error(f"Error in simple DOCX text extraction: {e}")
-            return f"[DOCX file processing failed: {str(e)}]"
+            # Returning the message as text would index the failure itself as a
+            # chunk: the document looks uploaded, and the error string turns up
+            # in search results. Raise so the caller reports a failed upload.
+            from xgen_doc2chunk.core.functions.ooxml_repair import describe_ooxml_failure
+
+            detail = describe_ooxml_failure(current_file.get("file_data", b""))
+            self.logger.error(
+                f"Error in simple DOCX text extraction: {e} | {detail}"
+            )
+            raise RuntimeError(
+                f"DOCX file processing failed: {current_file.get('file_path', 'unknown')}. "
+                f"{detail}"
+            ) from e
 
 
 __all__ = ["DOCXHandler"]
