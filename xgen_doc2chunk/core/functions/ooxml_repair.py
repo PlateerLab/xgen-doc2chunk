@@ -293,6 +293,23 @@ def _normalize_part_name(value: Optional[str]) -> Optional[str]:
     return name[1:] if name.startswith("/") else name
 
 
+def _zip_entry_name(name: str) -> str:
+    r"""A zip entry name as OPC means it: forward slashes, no leading separator.
+
+    APPNOTE 4.4.17.1 requires ``/`` inside a zip, but some generators write the
+    host separator instead, producing entries like ``word\document.xml``.
+    Python normalised those away up to 3.12; from 3.13 ``namelist()`` returns
+    them verbatim, so every part lookup - ``_rels/.rels`` included - misses and
+    the reader reports the package as having no root relationship.
+
+    The bytes of each part are untouched; only the name it is filed under changes.
+    """
+    normalized = name.replace("\\", "/")
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
+    return normalized[1:] if normalized.startswith("/") else normalized
+
+
 def _find_main_part(names: Sequence[str]) -> Tuple[Optional[str], Optional[str], Optional[str]]:
     """Return (part name, content type, kind) of the first main part found."""
     lookup = set(names)
@@ -376,12 +393,20 @@ def diagnose_ooxml_package(file_data: bytes) -> OoxmlDiagnosis:
 
     try:
         with zipfile.ZipFile(BytesIO(file_data)) as archive:
-            names = archive.namelist()
+            raw_names = archive.namelist()
+            # Every lookup below uses the normalised name, so a package written
+            # with host separators is diagnosed on its merits rather than being
+            # dismissed as "no main part".
+            names = [_zip_entry_name(name) for name in raw_names]
             entries = [
-                (name, archive.read(name)) for name in names if name.endswith((".xml", ".rels"))
+                (_zip_entry_name(name), archive.read(name))
+                for name in raw_names
+                if name.endswith((".xml", ".rels"))
             ]
     except (zipfile.BadZipFile, zipfile.LargeZipFile, OSError, RuntimeError, EOFError) as exc:
         return OoxmlDiagnosis("bad_zip", f"ZIP header present but unreadable: {exc}", False)
+
+    has_backslash_paths = any(name != raw for name, raw in zip(names, raw_names))
 
     main_part, _, package_kind = _find_main_part(names)
     if main_part is None:
@@ -398,6 +423,13 @@ def diagnose_ooxml_package(file_data: bytes) -> OoxmlDiagnosis:
 
     def result(kind: str, message: str) -> OoxmlDiagnosis:
         return OoxmlDiagnosis(kind, message, True, package_kind, main_part, unmapped)
+
+    if has_backslash_paths:
+        return result(
+            "backslash_paths",
+            "Zip entries use the host path separator (e.g. word\\document.xml) "
+            "instead of '/'. Readable once the entry names are normalised.",
+        )
 
     if part_data.get(ROOT_RELS_PART) is None:
         return result(
@@ -589,8 +621,12 @@ def _rebuild_content_types(
 
 
 def _clone_zipinfo(info: zipfile.ZipInfo) -> zipfile.ZipInfo:
-    """Copy the fields worth keeping, leaving sizes and CRC for writestr()."""
-    clone = zipfile.ZipInfo(info.filename, info.date_time)
+    """Copy the fields worth keeping, leaving sizes and CRC for writestr().
+
+    The name is normalised on the way out, so a package written with host
+    separators comes back spelled the way OPC readers look parts up.
+    """
+    clone = zipfile.ZipInfo(_zip_entry_name(info.filename), info.date_time)
     clone.compress_type = info.compress_type
     clone.external_attr = info.external_attr
     clone.internal_attr = info.internal_attr
@@ -606,7 +642,7 @@ def repair_ooxml_package(file_data: bytes) -> Optional[bytes]:
     """
     try:
         with zipfile.ZipFile(BytesIO(file_data)) as source:
-            names = source.namelist()
+            names = [_zip_entry_name(name) for name in source.namelist()]
             main_part, content_type, _ = _find_main_part(names)
             if main_part is None or content_type is None:
                 return None
@@ -615,17 +651,18 @@ def repair_ooxml_package(file_data: bytes) -> Optional[bytes]:
         logger.debug("OOXML repair: package is not readable as a ZIP (%s)", exc)
         return None
 
-    rewritten: List[Tuple[zipfile.ZipInfo, bytes]] = []
+    rewritten: List[Tuple[zipfile.ZipInfo, str, bytes]] = []
     substitutions = 0
     for info, data in payload:
-        if info.filename.endswith((".xml", ".rels")):
+        entry_name = _zip_entry_name(info.filename)
+        if entry_name.endswith((".xml", ".rels")):
             data, count = normalize_ooxml_xml(
-                data, relationship_part=info.filename.endswith(".rels")
+                data, relationship_part=entry_name.endswith(".rels")
             )
             substitutions += count
-        rewritten.append((info, data))
+        rewritten.append((info, entry_name, data))
 
-    by_name = {info.filename: data for info, data in rewritten}
+    by_name = {entry_name: data for _, entry_name, data in rewritten}
     new_rels = _rebuild_root_rels(by_name.get(ROOT_RELS_PART), main_part, set(names))
     new_content_types = _rebuild_content_types(
         by_name.get(CONTENT_TYPES_PART), main_part, content_type
@@ -634,12 +671,12 @@ def repair_ooxml_package(file_data: bytes) -> Optional[bytes]:
     buffer = BytesIO()
     written = set()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as target:
-        for info, data in rewritten:
-            if info.filename == ROOT_RELS_PART:
+        for info, entry_name, data in rewritten:
+            if entry_name == ROOT_RELS_PART:
                 data = new_rels
-            elif info.filename == CONTENT_TYPES_PART and new_content_types is not None:
+            elif entry_name == CONTENT_TYPES_PART and new_content_types is not None:
                 data = new_content_types
-            written.add(info.filename)
+            written.add(entry_name)
             target.writestr(_clone_zipinfo(info), data)
 
         if ROOT_RELS_PART not in written:

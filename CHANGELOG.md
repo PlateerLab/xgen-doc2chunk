@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.71] - 2026-09-18
+
+### Fixed
+- **DOCX**: A package whose zip entries use the host path separator
+  (`word\\document.xml` instead of `word/document.xml`) failed with the same
+  message 0.3.7 addressed -
+  `no relationship of type '...officeDocument' in collection` - but for a different
+  reason, so 0.3.7 did not help. The package wiring is intact; only the **names the
+  parts are filed under** are wrong. APPNOTE 4.4.17.1 requires `/`, so such a file is
+  malformed, but it is produced by real generators and Word opens it.
+  - **Why it surfaced now**: CPython normalised `\` to `/` in `zipfile` up to 3.12.
+    From 3.13 `namelist()` returns the name verbatim, so `_rels/.rels` is no longer
+    found and every OPC reader reports a missing root relationship. The same file
+    therefore reads on 3.12 and fails on 3.14 - the document was always malformed.
+  - **Why 0.3.7 missed it**: `diagnose_ooxml_package()` looked parts up by their
+    literal names, so `_find_main_part()` matched nothing and the diagnosis stopped at
+    `no_main_part` (not repairable) before any of the 0.3.7 repairs were considered.
+- `diagnose_ooxml_package()` now resolves every part by its **normalised** name, and
+  reports the new kind `backslash_paths` so the symptom names the cause instead of
+  being mistaken for `missing_root_rels`.
+- `repair_ooxml_package()` rewrites the entry names on the way out. Part **bytes are
+  untouched**; only the name each part is filed under changes.
+
+### Notes
+- A file that already reads today follows the identical path as in 0.3.7: repair is
+  still attempted only after python-docx has raised.
+- `backslash_paths` combines with the other repairs - a package that is both Strict and
+  backslash-named is handled in one pass.
+
 ## [0.3.7] - 2026-09-16
 
 ### Fixed
