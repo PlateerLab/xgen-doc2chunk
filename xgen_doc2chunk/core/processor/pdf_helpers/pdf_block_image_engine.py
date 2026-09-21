@@ -43,7 +43,7 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Tuple
 from enum import Enum, auto
 
-import fitz
+import xgen_pdf as fitz
 from PIL import Image
 
 # Image processing module

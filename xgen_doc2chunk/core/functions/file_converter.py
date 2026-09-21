@@ -14,7 +14,7 @@ This is the FIRST step in the processing pipeline:
 Usage:
     class PDFFileConverter(BaseFileConverter):
         def convert(self, file_data: bytes, file_stream: BinaryIO) -> Any:
-            import fitz
+            import xgen_pdf as fitz
             return fitz.open(stream=file_data, filetype="pdf")
         
         def get_format_name(self) -> str:
