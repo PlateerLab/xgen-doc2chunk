@@ -17,8 +17,7 @@ from xgen_doc2chunk.core.functions.img_processor import ImageProcessor
 from xgen_doc2chunk.core.functions.storage_backend import BaseStorageBackend
 
 if TYPE_CHECKING:
-    import fitz
-
+    import xgen_pdf as fitz
 logger = logging.getLogger("xgen_doc2chunk.image_processor.pdf")
 
 
@@ -124,8 +123,7 @@ class PDFImageProcessor(ImageProcessor):
             Image tag string, or None on failure
         """
         try:
-            import fitz
-            
+            import xgen_pdf as fitz
             image_dict = doc.extract_image(xref)
             if not image_dict:
                 return None
@@ -160,8 +158,7 @@ class PDFImageProcessor(ImageProcessor):
             Image tag string, or None on failure
         """
         try:
-            import fitz
-            
+            import xgen_pdf as fitz
             # Calculate zoom for DPI
             zoom = self._dpi / 72.0
             mat = fitz.Matrix(zoom, zoom)
@@ -219,8 +216,7 @@ class PDFImageProcessor(ImageProcessor):
             Image tag string, or None on failure
         """
         try:
-            import fitz
-            
+            import xgen_pdf as fitz
             zoom = self._dpi / 72.0
             mat = fitz.Matrix(zoom, zoom)
             pix = page.get_pixmap(matrix=mat, alpha=alpha)

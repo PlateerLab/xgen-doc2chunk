@@ -8,8 +8,7 @@ These regions are filtered to avoid being misidentified as tables.
 import logging
 from typing import List, Dict, Tuple, Optional
 
-import fitz
-
+import xgen_pdf as fitz
 from xgen_doc2chunk.core.processor.pdf_helpers.types import GraphicRegionInfo, PDFConfig
 
 logger = logging.getLogger(__name__)

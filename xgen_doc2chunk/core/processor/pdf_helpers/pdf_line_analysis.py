@@ -11,8 +11,7 @@ import logging
 import math
 from typing import List, Optional, Tuple
 
-import fitz
-
+import xgen_pdf as fitz
 from xgen_doc2chunk.core.processor.pdf_helpers.types import LineInfo, GridInfo, LineThickness, PDFConfig
 
 logger = logging.getLogger(__name__)

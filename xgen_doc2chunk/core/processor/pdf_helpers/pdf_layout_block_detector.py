@@ -68,8 +68,7 @@ from enum import Enum, auto
 from collections import defaultdict
 import math
 
-import fitz
-
+import xgen_pdf as fitz
 logger = logging.getLogger(__name__)
 
 

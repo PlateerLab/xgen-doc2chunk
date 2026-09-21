@@ -30,7 +30,7 @@ import unicodedata
 from typing import List, Dict, Tuple, Optional, Set
 from dataclasses import dataclass, field
 
-import fitz
+import xgen_pdf as fitz
 from PIL import Image
 import pytesseract
 

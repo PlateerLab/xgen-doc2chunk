@@ -20,8 +20,7 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Tuple, Set
 from enum import Enum, auto
 
-import fitz
-
+import xgen_pdf as fitz
 logger = logging.getLogger(__name__)
 
 
