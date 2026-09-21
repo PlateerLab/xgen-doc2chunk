@@ -39,7 +39,7 @@ class PDFFileConverter(BaseFileConverter):
         Raises:
             RuntimeError: If PDF cannot be opened
         """
-        import fitz
+        import xgen_pdf as fitz
         return fitz.open(stream=file_data, filetype="pdf")
     
     def get_format_name(self) -> str:

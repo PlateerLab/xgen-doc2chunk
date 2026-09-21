@@ -109,9 +109,7 @@ from xgen_doc2chunk.core.processor.pdf_helpers.pdf_table_quality_analyzer import
 logger = logging.getLogger("document-processor")
 
 # PyMuPDF import
-import fitz
-
-
+import xgen_pdf as fitz
 # Enum aliases for backward compatibility
 TableDetectionStrategy = TableDetectionStrategyType
 

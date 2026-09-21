@@ -9,7 +9,7 @@ Improved cell extraction accuracy.
 import logging
 from typing import List, Dict, Optional, Tuple, Any, Set
 
-import fitz
+import xgen_pdf as fitz
 import pdfplumber
 
 from xgen_doc2chunk.core.processor.pdf_helpers.types import (

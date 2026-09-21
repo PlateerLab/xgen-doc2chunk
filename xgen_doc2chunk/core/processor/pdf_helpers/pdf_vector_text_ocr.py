@@ -9,7 +9,7 @@ import io
 import logging
 from typing import List, Dict, Tuple, Optional
 
-import fitz
+import xgen_pdf as fitz
 from PIL import Image
 import pytesseract
 
