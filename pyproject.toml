@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "xgen-doc2chunk"
-version = "0.4.0"
+version = "0.4.1"
 description = "Convert raw documents into AI-understandable context with intelligent text extraction, table detection, and semantic chunking"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -68,7 +68,6 @@ dependencies = [
     "openpyxl>=3.1",
     "xlrd>=2.0",
     "olefile>=0.47",
-    "pyhwp>=0.1b15",
     "chardet>=5.2",
     "pi-heif>=1.0",
     "pdfminer-six>=20251230",
@@ -105,8 +104,8 @@ exclude = [
     "libs/",
 ]
 
-# xgen-pdf 는 GitHub Release wheel 로 배포된다 (PyPI Trusted Publisher 등록 전).
-# uv 로 개발 설치할 때 이 소스를 쓴다. PyPI 소비자(xgen-documents 등)는 자기
-# pyproject 에 같은 URL 을 직접참조로 둔다.
+# xgen-pdf 는 PyPI 가 아니라 GitHub Release wheel 로만 배포된다. uv 개발 설치는 이
+# 소스를 쓰고, 소비자(xgen-documents · xgen-workflow)는 자기 pyproject 에 같은 URL 을
+# 직접참조로 둔다 — 이름 요구(xgen-pdf>=0.1.1)는 그 URL 로 풀린다(pip·uv 모두 확인).
 [tool.uv.sources]
 xgen-pdf = { url = "https://github.com/PlateerLab/xgen-pdf/releases/download/v0.1.1/xgen_pdf-0.1.1-py3-none-any.whl" }
