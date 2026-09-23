@@ -3,6 +3,8 @@
 HWP Handler - HWP 5.0 OLE Format File Processor
 
 Class-based handler for HWP files inheriting from BaseHandler.
+
+본 제품은 한글과컴퓨터의 글 문서 파일(.hwp) 공개 문서를 참고하여 개발하였습니다.
 """
 import io
 import os
