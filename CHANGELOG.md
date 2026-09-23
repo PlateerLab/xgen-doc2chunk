@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-09-23
+
+### Removed
+- **pyhwp dependency** (AGPL-3.0). It was declared from the first release but never
+  imported: HWP is read by the package's own parser (`hwp_helper`, olefile + zlib).
+  Extraction output is byte-identical with and without pyhwp installed (8 HWP files,
+  including real press releases and reports).
+- `uv.lock` regenerated; it still carried pymupdf and pyhwp from before 0.4.0.
+
+## [0.4.0] - 2026-09-21
+
+### Changed
+- **PDF handling moved from PyMuPDF (AGPL-3.0) to xgen-pdf** (pdfium-based, Apache-2.0).
+  All `fitz` consumers import `xgen_pdf as fitz`; the call surface is unchanged.
+  End-to-end extraction on six real PDFs keeps plain-text similarity 0.97-1.00 with
+  identical page and image counts. xgen-pdf ships as a GitHub Release wheel.
+
 ## [0.3.71] - 2026-09-18
 
 ### Fixed
