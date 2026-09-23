@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.4.1] - 2026-09-23
 
+### Fixed
+- **HWP text decoding** (`HwpRecord.get_text`), per the HWP 5.0 spec table 6:
+  - TAB is an 8-word inline control. It was read as one word, so the tab's 7 data words
+    came out as stray characters (Cyrillic, Arabic, Syriac, ... - up to 200 per real
+    document).
+  - Ordinary characters are decoded as UTF-16LE runs, so a surrogate pair (Hancom PUA
+    symbols such as U+F02B1) stays one character. It was split into two lone surrogates
+    (552 across 23 real documents), which break UTF-8 encoding downstream
+    (`surrogates not allowed`).
+  - Hyphen (24), non-breaking space (30) and fixed-width space (31) are now text
+    (`▪수소` → `▪ 수소`).
+  - Output otherwise unchanged; extended-control markers (`\x0b`) are placed as before.
+
 ### Removed
 - **pyhwp dependency** (AGPL-3.0). It was declared from the first release but never
   imported: HWP is read by the package's own parser (`hwp_helper`, olefile + zlib).
