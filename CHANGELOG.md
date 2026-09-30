@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] - 2026-09-30
+
+### Changed
+- 의존성을 정확한 버전으로 고정했다(27개) — 소비 서비스(xgen-workflow·xgen-documents)가 지금 설치하는 버전.
+  두 서비스가 서로 다른 버전을 쓰는 7개(python-dotenv·orjson·pdfplumber·chardet·pi-heif·pdfminer-six·striprtf)는
+  범위로 두고 각 서비스의 잠금 파일이 고정한다.
+- `xgen-pdf>=0.1.1` → `xgen-pdf==0.1.2`(이름 참조는 PyPI 규칙, 소비자가 같은 버전의 URL 을 직접 참조한다).
+
 ## [0.4.1] - 2026-09-23
 
 ### Fixed
