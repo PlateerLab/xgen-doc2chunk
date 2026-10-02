@@ -50,6 +50,7 @@ from typing import Any, Dict, List, Optional, Tuple, Set, TYPE_CHECKING
 
 # Base handler
 from xgen_doc2chunk.core.processor.base_handler import BaseHandler
+from xgen_doc2chunk.core.processor.pdf_helpers.pdfium_lock import PDFIUM_LOCK
 from xgen_doc2chunk.core.functions.img_processor import ImageProcessor
 
 if TYPE_CHECKING:
@@ -177,7 +178,9 @@ class PDFHandler(BaseHandler):
         """
         file_path = current_file.get("file_path", "unknown")
         self.logger.info(f"[PDF] Processing: {file_path}")
-        return self._extract_pdf(current_file, extract_metadata)
+        # pdfium is not thread-safe — one PDF at a time per process (pdfium_lock).
+        with PDFIUM_LOCK:
+            return self._extract_pdf(current_file, extract_metadata)
 
     def extract_text_fast(self, current_file: "CurrentFile") -> str:
         """
@@ -191,6 +194,10 @@ class PDFHandler(BaseHandler):
         file_data = current_file.get("file_data", b"")
         self.logger.info(f"[PDF fast] Plain text extraction: {file_path}")
 
+        with PDFIUM_LOCK:
+            return self._extract_text_fast_locked(current_file, file_path, file_data)
+
+    def _extract_text_fast_locked(self, current_file: "CurrentFile", file_path: str, file_data: bytes) -> str:
         try:
             doc = self.file_converter.convert(file_data)
             page_texts = []

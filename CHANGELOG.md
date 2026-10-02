@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.3] - 2026-10-02
+
+### Fixed
+- PDF extraction is serialized per process (`pdf_helpers/pdfium_lock.PDFIUM_LOCK`). pdfium is not
+  thread-safe: two PDFs extracted at the same time garbled the text, left later extractions failing
+  with "broken document", and could crash the process with a segmentation fault. Both
+  `PDFHandler.extract_text` and `extract_text_fast` take the lock, so every caller sharing a process
+  is covered.
+
 ## [0.4.2] - 2026-09-30
 
 ### Changed
