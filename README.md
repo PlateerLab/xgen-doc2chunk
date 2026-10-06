@@ -167,7 +167,7 @@ engine = VllmOCR(base_url="http://localhost:8000", model="Qwen/Qwen2-VL-7B-Instr
 | Category | Extensions |
 |----------|------------|
 | Documents | `.pdf`, `.docx`, `.doc`, `.rtf`, `.pptx`, `.ppt`, `.hwp`, `.hwpx` |
-| Spreadsheets | `.xlsx`, `.xls`, `.csv`, `.tsv` |
+| Spreadsheets | `.xlsx`, `.xlsm`, `.xltx`, `.xltm`, `.xls`, `.csv`, `.tsv` |
 | Text | `.txt`, `.md`, `.markdown` |
 | Web | `.html`, `.htm`, `.xhtml` |
 | Images | `.jpg`, `.jpeg`, `.png`, `.gif`, `.bmp`, `.webp` |
@@ -175,6 +175,31 @@ engine = VllmOCR(base_url="http://localhost:8000", model="Qwen/Qwen2-VL-7B-Instr
 | Config | `.json`, `.yaml`, `.yml`, `.xml`, `.toml`, `.ini`, `.cfg`, `.conf`, `.properties`, `.env` |
 | Script | `.sh`, `.bat`, `.ps1`, `.zsh`, `.fish` |
 | Log | `.log` |
+
+### Spreadsheets
+
+Every sheet is read to the end of its used range and written as Markdown tables:
+
+- Cells show what Excel shows (number formats, dates, percentages, currency). A formula saved
+  without a cached value is kept as its formula (`=SUM(B2:B4)`).
+- Tables are found even with spacer columns, blank rows between groups, form layouts
+  (`label: value`) and sparse cells. Multi-row merged headers are flattened (`1월 목표`), and a
+  table title is kept as `[Table N] title`.
+- When a table is split into chunks, every chunk repeats the title and the header row. A row
+  longer than three times `chunk_size` is split by its longest cell, the other cells repeated.
+- Each sheet is a page (`page_number` follows sheet order). Workbooks whose sheet XML exceeds
+  20 MiB are streamed.
+
+Options, under `config["spreadsheet"]`:
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `include_hidden` | `True` | Keep hidden sheets, rows and columns |
+| `streaming_threshold_bytes` | `20971520` | Stream workbooks whose sheet XML is larger |
+
+```python
+processor = DocumentProcessor(config={"spreadsheet": {"include_hidden": False}})
+```
 
 ## Architecture
 
@@ -188,7 +213,7 @@ xgen_doc2chunk/
 │   │   ├── docx_handler.py         # DOCX processing
 │   │   ├── doc_handler.py          # DOC processing (auto-detects format)
 │   │   ├── ppt_handler.py          # PowerPoint processing
-│   │   ├── excel_handler.py        # Excel processing (XLSX/XLS)
+│   │   ├── excel_handler.py        # Excel processing (XLSX/XLSM/XLS)
 │   │   ├── csv_handler.py          # CSV/TSV processing
 │   │   ├── hwp_handler.py          # HWP (OLE) processing
 │   │   ├── hwpx_handler.py         # HWPX (ZIP/XML) processing

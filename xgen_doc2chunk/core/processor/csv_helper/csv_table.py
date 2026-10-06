@@ -143,70 +143,67 @@ def analyze_merge_info(rows: List[List[str]]) -> List[List[Dict[str, Any]]]:
 
 def convert_rows_to_table(rows: List[List[str]], has_header: bool) -> str:
     """
-    CSV 행을 테이블로 변환합니다.
-    병합셀이 없으면 Markdown, 있으면 HTML로 변환합니다.
+    CSV 행을 마크다운 표로 변환합니다.
+
+    CSV 에는 병합 셀이 없습니다. 예전에는 빈 칸을 병합으로 추정해 앞 셀·윗 셀에 합친 HTML 을
+    만들었는데, 그러면 사번이 빈 사람이 윗사람의 사번을 받는 식으로 값이 다른 행·열에 붙었습니다.
+    이제 빈 칸은 빈 칸 그대로 둡니다.
 
     Args:
         rows: 파싱된 행 데이터
-        has_header: 헤더 존재 여부
+        has_header: 첫 행이 머리글인지(아니면 열 문자 A, B, ... 를 머리글로 씁니다)
 
     Returns:
-        변환된 테이블 문자열
+        마크다운 표 문자열
     """
     if not rows:
         return ""
+    return convert_rows_to_markdown(rows, has_header)
 
-    # 병합셀 유무 확인
-    has_merged = has_merged_cells(rows)
 
-    if has_merged:
-        logger.debug("Merged cells detected, using HTML format")
-        return convert_rows_to_html(rows, has_header)
+def _column_letter(col: int) -> str:
+    out = ""
+    while col > 0:
+        col, rem = divmod(col - 1, 26)
+        out = chr(65 + rem) + out
+    return out
+
+
+def _md_cell(cell) -> str:
+    value = " ".join(str(cell).split()) if cell else ""
+    return value.replace("|", "\\|")
+
+
+def convert_rows_to_markdown(rows: List[List[str]], has_header: bool = True) -> str:
+    """
+    CSV 행을 마크다운 표로 변환합니다.
+
+    - has_header 가 True 면 첫 행이 머리글, 아니면 열 문자(A, B, ...)를 머리글로 씁니다
+      (데이터 행을 머리글로 쓰지 않습니다).
+    - 행마다 열 수를 가장 넓은 행에 맞춰 빈 칸으로 채웁니다.
+    - 셀 안의 줄바꿈·연속 공백은 한 칸으로, 파이프는 이스케이프합니다.
+
+    Args:
+        rows: 파싱된 행 데이터
+        has_header: 첫 행이 머리글인지
+
+    Returns:
+        마크다운 표 문자열
+    """
+    if not rows:
+        return ""
+    width = max(len(r) for r in rows)
+    if has_header:
+        header, body = rows[0], rows[1:]
     else:
-        logger.debug("No merged cells, using Markdown format")
-        return convert_rows_to_markdown(rows, has_header)
-
-
-def convert_rows_to_markdown(rows: List[List[str]], _has_header: bool) -> str:
-    """
-    CSV 행을 Markdown 테이블로 변환합니다.
-
-    Note:
-        Markdown 테이블은 첫 행이 항상 헤더로 취급되므로
-        _has_header 인자는 HTML 변환과의 인터페이스 일관성을 위해 유지됩니다.
-
-    Args:
-        rows: 파싱된 행 데이터
-        _has_header: 헤더 존재 여부 (Markdown에서는 미사용)
-
-    Returns:
-        Markdown 테이블 문자열
-    """
-    if not rows:
-        return ""
-
-    md_parts = []
-
-    for row_idx, row in enumerate(rows):
-        # 셀 값 정리 (파이프 문자 이스케이프)
-        cells = []
-        for cell in row:
-            cell_value = cell.strip() if cell else ""
-            # Markdown 테이블에서 파이프는 이스케이프 필요
-            cell_value = cell_value.replace("|", "\\|")
-            # 줄바꿈을 공백으로 변환 (Markdown 테이블은 줄바꿈 미지원)
-            cell_value = cell_value.replace("\n", " ")
-            cells.append(cell_value)
-
-        # 행 생성
-        row_str = "| " + " | ".join(cells) + " |"
-        md_parts.append(row_str)
-
-        # 헤더 구분선 추가 (첫 번째 행 다음)
-        if row_idx == 0:
-            separator = "| " + " | ".join(["---"] * len(cells)) + " |"
-            md_parts.append(separator)
-
+        header, body = [_column_letter(i + 1) for i in range(width)], rows
+    header = list(header) + [""] * (width - len(header))
+    names = [_md_cell(h) or _column_letter(i + 1) for i, h in enumerate(header)]
+    md_parts = ["| " + " | ".join(names) + " |", "| " + " | ".join(["---"] * width) + " |"]
+    for row in body:
+        cells = [_md_cell(c) for c in row] + [""] * (width - len(row))
+        if any(cells):
+            md_parts.append("| " + " | ".join(cells) + " |")
     return "\n".join(md_parts)
 
 

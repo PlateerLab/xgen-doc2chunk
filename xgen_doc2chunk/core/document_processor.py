@@ -274,7 +274,7 @@ class DocumentProcessor:
         'html', 'css', 'jsx', 'tsx', 'vue', 'svelte'
     ])
     CONFIG_TYPES = frozenset(['json', 'yaml', 'yml', 'xml', 'toml', 'ini', 'cfg', 'conf', 'properties', 'env'])
-    DATA_TYPES = frozenset(['csv', 'tsv', 'xlsx', 'xls'])
+    DATA_TYPES = frozenset(['csv', 'tsv', 'xlsx', 'xlsm', 'xltx', 'xltm', 'xls'])
     SCRIPT_TYPES = frozenset(['sh', 'bat', 'ps1', 'zsh', 'fish'])
     LOG_TYPES = frozenset(['log'])
     WEB_TYPES = frozenset(['htm', 'xhtml'])
@@ -1091,8 +1091,9 @@ class DocumentProcessor:
                 page_tag_processor=self._page_tag_processor,
                 chart_processor=self._chart_processor
             )
-            self._handler_registry['xlsx'] = excel_handler.extract_text
-            self._handler_registry['xls'] = excel_handler.extract_text
+            # xlsm·xltx·xltm 은 xlsx 와 같은 OOXML 이다(매크로·서식 파일)
+            for _ext in ('xlsx', 'xlsm', 'xltx', 'xltm', 'xls'):
+                self._handler_registry[_ext] = excel_handler.extract_text
         except ImportError as e:
             self._logger.warning(f"Excel handler not available: {e}")
 
