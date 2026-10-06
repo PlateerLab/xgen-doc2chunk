@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.5] - 2026-10-06
+
+### Security
+- python-multipart 0.0.30 → 0.0.32(PYSEC-2026-3040, 0.0.31 에서 고침), pydantic-settings 2.12.0 → 2.14.2(CVE-2026-58203).
+
 ## [0.4.4] - 2026-10-06
 
 ### Security
