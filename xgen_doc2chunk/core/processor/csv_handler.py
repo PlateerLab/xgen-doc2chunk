@@ -80,7 +80,7 @@ class CSVHandler(BaseHandler):
         ext = current_file.get("file_extension", os.path.splitext(file_path)[1]).lower()
         self.logger.info(f"CSV processing: {file_path}, ext: {ext}")
 
-        if ext == '.tsv' and delimiter is None:
+        if ext.lstrip('.') == 'tsv' and delimiter is None:
             delimiter = '\t'
 
         try:

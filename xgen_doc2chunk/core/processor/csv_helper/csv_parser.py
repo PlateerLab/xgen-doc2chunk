@@ -10,7 +10,7 @@ import logging
 import re
 from typing import List
 
-from xgen_doc2chunk.core.processor.csv_helper.csv_constants import DELIMITER_CANDIDATES, MAX_ROWS, MAX_COLS
+from xgen_doc2chunk.core.processor.csv_helper.csv_constants import DELIMITER_CANDIDATES
 
 logger = logging.getLogger("document-processor")
 
@@ -92,15 +92,8 @@ def parse_csv_content(content: str, delimiter: str) -> List[List[str]]:
             skipinitialspace=True
         )
 
-        for i, row in enumerate(reader):
-            if i >= MAX_ROWS:
-                logger.warning(f"CSV row limit reached: {MAX_ROWS}")
-                break
-
-            # 열 수 제한
-            if len(row) > MAX_COLS:
-                row = row[:MAX_COLS]
-
+        # 행·열 상한을 두지 않는다. 예전에는 100,000행·1,000열을 넘는 부분을 로그 경고만 남기고 버렸다.
+        for row in reader:
             # 빈 행 건너뛰기
             if any(cell.strip() for cell in row):
                 rows.append(row)
@@ -128,19 +121,11 @@ def parse_csv_simple(content: str, delimiter: str) -> List[List[str]]:
     """
     rows = []
 
-    for i, line in enumerate(content.split('\n')):
-        if i >= MAX_ROWS:
-            break
-
+    for line in content.split('\n'):
         line = line.strip()
         if not line:
             continue
-
-        cells = line.split(delimiter)
-        if len(cells) > MAX_COLS:
-            cells = cells[:MAX_COLS]
-
-        rows.append(cells)
+        rows.append(line.split(delimiter))
 
     return rows
 

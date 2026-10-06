@@ -135,10 +135,11 @@ def extract_content_segments(
     # Define special block patterns
     # Recognize [Table N] marker together with table as a single block
     patterns = [
-        # [Table N] + HTML table
-        ('table', r'(?:\[Table\s*\d+\]\s*)?<table\s+border=["\']1["\']>.*?</table>'),
-        # [Table N] + Markdown table (multiple lines starting with |, last row matches even without newline)
-        ('table', r'\[Table\s*\d+\]\s*\n(?:\|[^\n]*\|(?:\s*\n|$))+'),
+        # [Table N] (optional caption on the same line) + HTML table
+        ('table', r'(?:\[Table\s*\d+\][^\n<]*\n?\s*)?<table\s+border=["\']1["\']>.*?</table>'),
+        # [Table N] (optional caption on the same line) + Markdown table
+        # (multiple lines starting with |, last row matches even without newline)
+        ('table', r'\[Table\s*\d+\][^\n]*\n(?:\|[^\n]*\|(?:[ \t]*\n|$))+'),
         # Standalone Markdown table (starts with | and has --- separator, last row matches even without newline)
         ('table', r'(?:^|\n)(\|[^\n]*\|\s*\n\|[\s\-:]*\|[^\n]*(?:\n\|[^\n]*\|)*)'),
         ('chart', chart_pat),

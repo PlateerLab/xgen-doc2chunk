@@ -283,6 +283,16 @@ def create_chunks(
     reconstructed = reconstruct_text_from_chunks(chunks, chunk_overlap)
     line_table = _build_line_offset_table(reconstructed, file_extension, page_tag_processor)
 
+    # Chunks repeat the document metadata block at their head. The page is taken
+    # from the first line after it, otherwise the block (which sits before the
+    # chunk's own page/sheet marker) would assign the previous page.
+    leading_metadata = re.compile(
+        r'\s*(?:' + _get_metadata_block_pattern(metadata_formatter) + r')\s*', re.DOTALL
+    )
+
+    # Line starts are computed once; looking them up per chunk made this quadratic
+    line_starts = [line["start"] for line in line_table]
+
     # Add metadata to each chunk
     result: List[Dict[str, Any]] = []
     current_pos = 0
@@ -291,12 +301,15 @@ def create_chunks(
         start = current_pos
         end = current_pos + len(chunk) - 1
 
-        start_line_idx = _find_line_index_by_pos(start, line_table)
-        end_line_idx = _find_line_index_by_pos(end, line_table)
+        start_line_idx = _find_line_index_by_pos(start, line_table, line_starts)
+        end_line_idx = _find_line_index_by_pos(end, line_table, line_starts)
 
         line_start = line_table[start_line_idx]["line_num"]
         line_end = line_table[end_line_idx]["line_num"]
-        page_number = line_table[start_line_idx].get("page", 1)
+
+        lead = leading_metadata.match(chunk)
+        body_start = start + lead.end() if lead and lead.end() < len(chunk) else start
+        page_number = line_table[_find_line_index_by_pos(body_start, line_table, line_starts)].get("page", 1)
 
         result.append({
             "text": chunk,
@@ -746,7 +759,8 @@ def _extract_page_mapping(
                 if matches:
                     for i, match in enumerate(matches):
                         page_num = int(match.group(1))
-                        start = match.end()
+                        # The marker line belongs to the page it opens
+                        start = match.start()
                         end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
                         page_mapping.append({
                             "page_num": page_num,
@@ -774,20 +788,25 @@ def _extract_page_mapping(
             if not page_mapping:
                 page_mapping = [{"page_num": 1, "start_pos": 0, "end_pos": len(text)}]
 
-        elif ext_lower in ['xlsx', 'xls']:
+        elif ext_lower in ['xlsx', 'xlsm', 'xltx', 'xltm', 'xls']:
             # Build sheet pattern from PageTagProcessor or use default
             sheet_pattern = _get_sheet_marker_pattern(page_tag_processor)
             matches = list(re.finditer(sheet_pattern, text))
 
             if matches:
+                # Table chunks repeat the sheet marker, so the page number is the
+                # sheet's order of first appearance rather than the match index.
+                sheet_numbers: Dict[str, int] = {}
                 for i, match in enumerate(matches):
-                    start = match.end()
+                    sheet_name = match.group(1).strip()
+                    page_num = sheet_numbers.setdefault(sheet_name, len(sheet_numbers) + 1)
+                    start = match.start()
                     end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
                     page_mapping.append({
-                        "page_num": i + 1,
+                        "page_num": page_num,
                         "start_pos": start,
                         "end_pos": end,
-                        "sheet_name": match.group(1).strip()
+                        "sheet_name": sheet_name
                     })
             else:
                 page_mapping = [{"page_num": 1, "start_pos": 0, "end_pos": len(text)}]
@@ -822,13 +841,18 @@ def _extract_page_mapping(
         return [{"page_num": 1, "start_pos": 0, "end_pos": len(text)}]
 
 
-def _find_line_index_by_pos(pos: int, line_table: List[Dict[str, int]]) -> int:
+def _find_line_index_by_pos(
+    pos: int,
+    line_table: List[Dict[str, int]],
+    starts: Optional[List[int]] = None
+) -> int:
     """
     Find the line index corresponding to the given position.
 
     Args:
         pos: Position in text
         line_table: Line offset table
+        starts: Precomputed line start offsets (pass it when calling in a loop)
 
     Returns:
         Line index (0-based)
@@ -836,7 +860,8 @@ def _find_line_index_by_pos(pos: int, line_table: List[Dict[str, int]]) -> int:
     try:
         if not line_table:
             return 0
-        starts = [line["start"] for line in line_table]
+        if starts is None:
+            starts = [line["start"] for line in line_table]
         idx = bisect.bisect_right(starts, pos) - 1
         return 0 if idx < 0 else min(idx, len(line_table) - 1)
     except Exception:
@@ -865,10 +890,21 @@ def _build_line_offset_table(
         pos = 0
         page_mapping = _extract_page_mapping(text, file_extension, page_tag_processor)
 
+        # Ranges sorted by start for a binary search (a linear scan per line was
+        # quadratic: table chunks repeat the sheet marker, one range per chunk)
+        ranges = sorted(page_mapping, key=lambda info: info["start_pos"])
+        range_starts = [info["start_pos"] for info in ranges]
+
         def _page_for_pos(p: int) -> int:
-            for info in page_mapping:
-                if info["start_pos"] <= p < info["end_pos"]:
+            i = bisect.bisect_right(range_starts, p) - 1
+            while i >= 0:
+                info = ranges[i]
+                if p < info["end_pos"]:
                     return info["page_num"]
+                # Ranges do not overlap in practice; step back only past empty ones
+                if info["start_pos"] < info["end_pos"]:
+                    break
+                i -= 1
             return 1
 
         for i, line in enumerate(lines):

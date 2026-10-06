@@ -134,7 +134,7 @@ class ExcelFileConverter(BaseFileConverter):
         # Determine format from extension or magic number
         if extension:
             ext = extension.lower().lstrip('.')
-            if ext == 'xlsx':
+            if ext in ('xlsx', 'xlsm', 'xltx', 'xltm'):
                 self._used_converter = self._xlsx_converter
             elif ext == 'xls':
                 self._used_converter = self._xls_converter
