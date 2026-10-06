@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.4] - 2026-10-06
+
+### Security
+- python-multipart 0.0.27 → 0.0.30, langsmith 0.8.0 → 0.8.18 — 소비 서비스 이미지 점검(Trivy)에서 나온 HIGH 취약점의
+  수정판. psutil 7.0.0 → 7.2.2 — xgen-documents 가 unstructured 를 보안 수정판(0.24.0, psutil>=7.2.2)으로 올릴 수 있게.
+- uv.lock 을 pyproject 의 고정 판으로 다시 맞췄다(0.4.2 에서 고정할 때 따라오지 않았다).
+
 ## [0.4.3] - 2026-10-02
 
 ### Fixed
