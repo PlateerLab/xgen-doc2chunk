@@ -317,6 +317,8 @@ class PageTagProcessor:
         elif tag_type == PageTagType.SHEET:
             escaped_prefix = re.escape(self._config.sheet_prefix)
             escaped_suffix = re.escape(self._config.sheet_suffix)
+            # Sheet tags carry the sheet name, not a number
+            return f'{escaped_prefix}([^\\n]+?){escaped_suffix}'
         else:
             escaped_prefix = re.escape(self._config.tag_prefix)
             escaped_suffix = re.escape(self._config.tag_suffix)

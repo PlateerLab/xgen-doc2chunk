@@ -95,7 +95,7 @@ CHUNK_INDEX_OVERHEAD = 30  # [Table chunk 1/10]\n
 TABLE_SIZE_THRESHOLD_MULTIPLIER = 1.2  # 1.2x of chunk_size
 
 # Table-based file types (CSV, TSV, Excel)
-TABLE_BASED_FILE_TYPES = {'csv', 'tsv', 'xlsx', 'xls'}
+TABLE_BASED_FILE_TYPES = {'csv', 'tsv', 'xlsx', 'xlsm', 'xltx', 'xltm', 'xls'}
 
 
 # ============================================================================
@@ -146,4 +146,5 @@ class ParsedMarkdownTable:
     total_cols: int              # Total columns
     original_text: str           # Original Markdown text
     header_text: str             # Header + separator for reuse
-    header_size: int             # Header size (characters)
+    header_size: int             # Header size (characters, includes the preamble)
+    preamble: str = ""           # Lines before the header row (e.g. "[Table 2] caption"), repeated in every chunk

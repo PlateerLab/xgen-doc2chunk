@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-10-06
+
+워크시트(엑셀·CSV) 처리를 다시 짰다. 시트는 격자 모델(`excel_helper/sheet_grid.py`)로 읽고, 표 감지와
+마크다운 렌더링(`excel_helper/sheet_layout.py`)은 xlsx·xls·HTML 엑셀이 함께 쓴다.
+
+### Fixed
+- 엑셀이 앞 1,000행·100열만 읽고 나머지를 경고 없이 버렸다. 사용 범위 끝까지 읽는다.
+- CSV 가 빈 칸을 병합으로 보고 앞 셀·윗 셀에 합쳐, 사번이 빈 사람이 윗사람 사번을 받았다. 빈 칸은 빈 칸으로 둔다.
+  CSV 의 100,000행·1,000열 상한도 없앴다.
+- 병합 머리글 표는 둘째 청크부터 머리글이 없었다. 여러 줄 머리글을 한 줄로 펴고(`1월 목표`) 모든 청크에 머리글과
+  표 제목(`[Table N] 제목`)을 다시 단다.
+- 빈 열·빈 행으로 표가 쪼개지거나, 양식(라벨|빈칸|값)과 드문 셀 표가 깨지거나 겹쳐 나왔다.
+- 표시 서식(0.153 → 15.3%, 날짜, 통화, 천 단위)을 무시했다. 계산값 없이 저장된 수식은 빈칸이었다(이제 `=B2*C2`).
+- 시트 이미지를 못 읽어(`str(anchor)` 예외) 모든 이미지가 시트마다 붙었다. 이미지가 있는 시트에 한 번만 붙는다.
+- `page_number`: 엑셀은 늘 1이었다(시트 표지 패턴이 숫자만 받았다). 시트 순서를 쓴다. PDF·DOCX 는 페이지 표지로
+  시작하는 청크가 앞 페이지 번호를 받았다.
+- 표 청크가 `chunk_size` 의 1.5배까지 채워졌다(HTML·마크다운 모두). `chunk_size` 를 넘는 것은 행 하나가 그보다 클 때뿐이다.
+- 위치 메타데이터 계산이 청크 수에 대해 제곱으로 느렸다(2만 행 3.6초 → 0.2초).
+- `.tsv` 확장자를 점 붙은 꼴로만 비교해 구분자 지정이 안 됐다.
+
+### Added
+- `.xlsm`, `.xltx`, `.xltm` 지원.
+- 시트 XML 이 20 MiB 를 넘는 워크북은 openpyxl read_only 로 스트리밍한다(병합·숨김·수식은 시트 XML 에서 읽는다).
+- `config["spreadsheet"]`: `include_hidden`(기본 True, 숨긴 시트·행·열 포함), `streaming_threshold_bytes`.
+- `chunk_size` 의 3배를 넘는 표 행은 가장 긴 셀을 나눠 여러 행으로 낸다(나머지 칸은 반복, 열 수 유지).
+- 테스트(`tests/`, 61개)와 CI(`.github/workflows/test.yml`).
+
+### Changed
+- 스프레드시트 표는 언제나 마크다운이다(병합이 있어도 HTML 로 바꾸지 않는다). 행마다 열 수가 같고 셀의 `|` 는 `\|` 다.
+- 엑셀 확장자로 저장된 HTML 표는 파일 이름의 시트 하나로 내며 일반 엑셀과 같은 렌더러를 쓴다.
+- 한 줄짜리 글 덩어리는 칸을 ` · ` 로 잇는다(파이프 표로 오인되지 않게).
+
 ## [0.4.5] - 2026-10-06
 
 ### Security

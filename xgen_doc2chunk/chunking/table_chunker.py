@@ -213,8 +213,8 @@ def split_table_into_chunks(
 
     Row splitting rules:
     - Minimum 1 row per chunk (rows are NEVER split)
-    - Chunks can expand up to 1.5x of chunk_size to include more rows
-    - Only exceeds chunk_size when necessary to maintain row integrity
+    - Rows are added while they fit in chunk_size
+    - Only exceeds chunk_size when a single row is larger than the budget
 
     Args:
         parsed_table: Parsed table information
@@ -244,9 +244,6 @@ def split_table_into_chunks(
     # Recalculate with actual chunk count
     available_per_chunk = calculate_available_space(chunk_size, header_size + context_size, 0, estimated_chunks)
 
-    # Maximum allowed chunk size (1.5x of chunk_size)
-    max_chunk_data_size = int(chunk_size * 1.5) - header_size - context_size - CHUNK_INDEX_OVERHEAD
-
     chunks: List[str] = []
     current_rows: List[TableRow] = []
     current_size = 0
@@ -255,27 +252,21 @@ def split_table_into_chunks(
     for row_idx, row in enumerate(data_rows):
         row_size = row.char_length + 1  # Including newline
 
-        # Check if adding this row exceeds available space
+        # Flush when this row no longer fits. Chunks used to be filled up to
+        # 1.5x chunk_size here, which made almost every table chunk oversized.
         if current_rows and (current_size + row_size > available_per_chunk):
-            # Check if we can still fit within 1.5x limit
-            if current_size + row_size <= max_chunk_data_size:
-                # Still within 1.5x limit - add row to current chunk
-                current_rows.append(row)
-                current_size += row_size
-            else:
-                # Exceeds 1.5x limit - flush current chunk and start new one
-                chunk_html = build_table_chunk(
-                    header_html,
-                    current_rows,
-                    chunk_index=len(chunks),
-                    total_chunks=estimated_chunks,
-                    context_prefix=context_prefix
-                )
-                chunks.append(chunk_html)
+            chunk_html = build_table_chunk(
+                header_html,
+                current_rows,
+                chunk_index=len(chunks),
+                total_chunks=estimated_chunks,
+                context_prefix=context_prefix
+            )
+            chunks.append(chunk_html)
 
-                # Start new chunk with this row (minimum 1 row guaranteed)
-                current_rows = [row]
-                current_size = row_size
+            # Start new chunk with this row (minimum 1 row guaranteed)
+            current_rows = [row]
+            current_size = row_size
         else:
             # Row fits - add to current chunk
             current_rows.append(row)
@@ -417,7 +408,7 @@ def split_oversized_block(
 ) -> List[str]:
     """
     Split a single rowspan block that exceeds max_chunk_data_size into
-    row-level sub-chunks. Rows are NEVER split internally.
+    row-level sub-chunks of at most available_space. Rows are NEVER split internally.
 
     Each sub-chunk that does not start at the block's first row gets the
     active spanning cells re-issued into its first row, so every sub-chunk
@@ -428,7 +419,7 @@ def split_oversized_block(
         block_carried: Carried-cell snapshot for each row (aligned with block_rows)
         header_html: Header HTML restored in every chunk
         available_space: Target data size per chunk
-        max_chunk_data_size: Hard limit per chunk (chunk_size * 1.5 based)
+        max_chunk_data_size: Size above which a block counts as oversized (kept for compatibility)
         context_prefix: Context info included in all chunks
         start_chunk_index: Chunk index offset for metadata
     Returns:
@@ -441,10 +432,10 @@ def split_oversized_block(
     for i, row in enumerate(block_rows):
         row_size = row.char_length + 1  # Including newline
 
-        # Flush when the row no longer fits within the 1.5x limit
+        # Flush when the row no longer fits in the chunk budget
         # (rows themselves are never split - a single oversized row
         #  becomes its own chunk)
-        if current_rows and current_size + row_size > max_chunk_data_size:
+        if current_rows and current_size + row_size > available_space:
             chunks.append(build_table_chunk(
                 header_html, current_rows,
                 start_chunk_index + len(chunks),
@@ -497,8 +488,8 @@ def split_table_preserving_rowspan(
     Algorithm:
     1. Track active rowspan for each row (by column position, considering colspan)
     2. If all rowspans from previous row end and new rowspan starts, create new block
-    3. Combine blocks to fit chunk_size
-    4. (force_chunking only) A block exceeding the 1.5x limit is split internally
+    3. Combine blocks to fit chunk_size (a block larger than chunk_size gets its own chunk)
+    4. (force_chunking only) A block exceeding 1.5x chunk_size is split internally
        at row boundaries, with carried spanning cells re-issued in each sub-chunk
 
     Args:
@@ -590,7 +581,7 @@ def split_table_preserving_rowspan(
     current_size = 0
 
     available_space = calculate_available_space(chunk_size, header_size + context_size, 0, 1)
-    # Maximum allowed chunk size (1.5x of chunk_size)
+    # Blocks above 1.5x chunk_size count as oversized (split only with force_chunking)
     max_chunk_data_size = int(chunk_size * 1.5) - header_size - context_size - CHUNK_INDEX_OVERHEAD
 
     # Carried-cell snapshots are only needed when oversized blocks may be split
@@ -620,19 +611,13 @@ def split_table_preserving_rowspan(
             continue
 
         if current_rows and current_size + group_size > available_space:
-            # Check if we can still fit within 1.5x limit
-            if current_size + group_size <= max_chunk_data_size:
-                # Still within 1.5x limit - add group to current chunk
-                current_rows.extend(group_rows)
-                current_size += group_size
-            else:
-                # Exceeds 1.5x limit - flush current chunk and start new one
-                chunks.append(build_table_chunk(
-                    header_html, current_rows, len(chunks), len(chunks) + 2,
-                    context_prefix=context_prefix
-                ))
-                current_rows = group_rows[:]
-                current_size = group_size
+            # Flush when the group no longer fits (no 1.5x fill)
+            chunks.append(build_table_chunk(
+                header_html, current_rows, len(chunks), len(chunks) + 2,
+                context_prefix=context_prefix
+            ))
+            current_rows = group_rows[:]
+            current_size = group_size
         else:
             current_rows.extend(group_rows)
             current_size += group_size
@@ -773,9 +758,15 @@ def parse_markdown_table(table_text: str) -> Optional[ParsedMarkdownTable]:
         # Data rows are all rows after separator
         data_rows = lines[separator_idx + 1:]
 
+        # Lines before the header row (e.g. "[Table 2] 2026 sales") used to be
+        # dropped when the table was split. Keep them and repeat them in every chunk.
+        preamble = "\n".join(lines[:max(separator_idx - 1, 0)])
+
         # Construct header text (header + separator) for restoration in each chunk
         header_text = f"{header_row}\n{separator_row}"
         header_size = len(header_text) + 1  # +1 for newline
+        if preamble:
+            header_size += len(preamble) + 1
 
         return ParsedMarkdownTable(
             header_row=header_row,
@@ -784,7 +775,8 @@ def parse_markdown_table(table_text: str) -> Optional[ParsedMarkdownTable]:
             total_cols=total_cols,
             original_text=table_text,
             header_text=header_text,
-            header_size=header_size
+            header_size=header_size,
+            preamble=preamble
         )
 
     except Exception as e:
@@ -797,7 +789,8 @@ def build_markdown_table_chunk(
     data_rows: List[str],
     chunk_index: int = 0,
     total_chunks: int = 1,
-    context_prefix: str = ""
+    context_prefix: str = "",
+    preamble: str = ""
 ) -> str:
     """
     Build a complete Markdown table chunk with header restored.
@@ -808,6 +801,7 @@ def build_markdown_table_chunk(
         chunk_index: Current chunk index (0-based)
         total_chunks: Total number of chunks
         context_prefix: Context info (metadata, sheet info, etc.) - included in all chunks
+        preamble: Lines that preceded the header (table marker, caption) - included in all chunks
 
     Returns:
         Complete Markdown table chunk
@@ -817,6 +811,9 @@ def build_markdown_table_chunk(
     # Add context prefix if provided
     if context_prefix:
         parts.append(context_prefix)
+
+    if preamble:
+        parts.append(preamble)
 
     # Add chunk index metadata (only if more than 1 chunk)
     if total_chunks > 1:
@@ -861,6 +858,66 @@ def update_markdown_chunk_metadata(chunks: List[str], total_chunks: int) -> List
     return updated_chunks
 
 
+# A row longer than this many chunk_size is split by its longest cell
+LONG_ROW_FACTOR = 3
+
+_UNESCAPED_PIPE = re.compile(r'(?<!\\)\|')
+
+
+def _cut_text(text: str, size: int) -> List[str]:
+    """Cut text into pieces of at most size characters, preferring whitespace."""
+    pieces: List[str] = []
+    while len(text) > size:
+        cut = text.rfind(" ", size // 2, size + 1)
+        if cut <= 0:
+            cut = size
+        pieces.append(text[:cut].strip())
+        text = text[cut:].strip()
+    if text:
+        pieces.append(text)
+    return pieces
+
+
+def split_long_markdown_row(row: str, budget: int) -> List[str]:
+    """
+    Split one oversized Markdown row into several full-width rows.
+
+    The longest cell is cut into pieces and every piece gets its own copy of the
+    row, so each piece keeps the other columns (id, title, ...) and every row
+    still has the full column count. A row whose length is not dominated by a
+    single cell (a very wide table) is returned unchanged.
+
+    Args:
+        row: Markdown table row (| a | b | c |)
+        budget: Target row length
+
+    Returns:
+        List of rows
+    """
+    stripped = row.strip()
+    if not (stripped.startswith('|') and stripped.endswith('|')):
+        return [row]
+    cells = [c.strip() for c in _UNESCAPED_PIPE.split(stripped)[1:-1]]
+    if not cells:
+        return [row]
+    longest = max(range(len(cells)), key=lambda i: len(cells[i]))
+    rest = len(stripped) - len(cells[longest])
+    if len(cells[longest]) < len(stripped) // 2:
+        return [row]
+    piece_size = max(budget - rest, 200)
+    pieces = _cut_text(cells[longest], piece_size)
+    # Never leave an escaped pipe split from its backslash
+    pieces = [p[:-1] if p.endswith('\\') else p for p in pieces]
+    if len(pieces) <= 1:
+        return [row]
+    rows = []
+    for piece in pieces:
+        parts = list(cells)
+        parts[longest] = piece
+        rows.append("| " + " | ".join(parts) + " |")
+    return rows
+
+
 def split_markdown_table_into_chunks(
     parsed_table: ParsedMarkdownTable,
     chunk_size: int,
@@ -869,7 +926,12 @@ def split_markdown_table_into_chunks(
 ) -> List[str]:
     """
     Split a parsed Markdown table into chunks that fit chunk_size.
-    Each chunk is a complete Markdown table with headers restored.
+    Each chunk is a complete Markdown table with headers (and the preamble,
+    such as a table caption) restored.
+
+    Rows are added while they fit in chunk_size. A single row larger than the
+    budget gets its own chunk; a row larger than LONG_ROW_FACTOR x chunk_size is
+    split by its longest cell (see split_long_markdown_row).
 
     NOTE: Table chunking does NOT apply overlap.
     Data duplication degrades search quality, so overlap is intentionally excluded.
@@ -886,6 +948,7 @@ def split_markdown_table_into_chunks(
     data_rows = parsed_table.data_rows
     header_text = parsed_table.header_text
     header_size = parsed_table.header_size
+    preamble = parsed_table.preamble
 
     # Calculate context size
     context_size = len(context_prefix) + 2 if context_prefix else 0  # +2 for newline
@@ -898,21 +961,23 @@ def split_markdown_table_into_chunks(
 
     # Calculate available space per chunk
     # Overhead: chunk index metadata (~25 chars) + header + context
-    estimated_chunks = 1
-    total_data_size = sum(len(row) + 1 for row in data_rows)  # +1 for newline
     available_per_chunk = chunk_size - header_size - context_size - CHUNK_INDEX_OVERHEAD
 
+    long_row_limit = chunk_size * LONG_ROW_FACTOR
+    if any(len(row) > long_row_limit for row in data_rows):
+        row_budget = max(available_per_chunk, chunk_size // 2)
+        expanded: List[str] = []
+        for row in data_rows:
+            if len(row) > long_row_limit:
+                expanded.extend(split_long_markdown_row(row, row_budget))
+            else:
+                expanded.append(row)
+        data_rows = expanded
+
+    estimated_chunks = 1
+    total_data_size = sum(len(row) + 1 for row in data_rows)  # +1 for newline
     if available_per_chunk > 0:
         estimated_chunks = max(1, (total_data_size + available_per_chunk - 1) // available_per_chunk)
-
-    # Recalculate with estimated chunks
-    if estimated_chunks > 1:
-        available_per_chunk = chunk_size - header_size - context_size - CHUNK_INDEX_OVERHEAD
-    else:
-        available_per_chunk = chunk_size - header_size - context_size
-
-    # Maximum allowed chunk size (1.5x of chunk_size)
-    max_chunk_data_size = int(chunk_size * 1.5) - header_size - context_size - CHUNK_INDEX_OVERHEAD
 
     chunks: List[str] = []
     current_rows: List[str] = []
@@ -921,27 +986,22 @@ def split_markdown_table_into_chunks(
     for row in data_rows:
         row_size = len(row) + 1  # +1 for newline
 
-        # Check if adding this row exceeds available space
+        # Flush when this row no longer fits. Chunks used to be filled up to
+        # 1.5x chunk_size here, which made almost every table chunk oversized.
         if current_rows and (current_size + row_size > available_per_chunk):
-            # Check if we can still fit within 1.5x limit
-            if current_size + row_size <= max_chunk_data_size:
-                # Still within 1.5x limit - add row to current chunk
-                current_rows.append(row)
-                current_size += row_size
-            else:
-                # Exceeds 1.5x limit - flush current chunk and start new one
-                chunk_text = build_markdown_table_chunk(
-                    header_text,
-                    current_rows,
-                    chunk_index=len(chunks),
-                    total_chunks=estimated_chunks,
-                    context_prefix=context_prefix
-                )
-                chunks.append(chunk_text)
+            chunk_text = build_markdown_table_chunk(
+                header_text,
+                current_rows,
+                chunk_index=len(chunks),
+                total_chunks=estimated_chunks,
+                context_prefix=context_prefix,
+                preamble=preamble
+            )
+            chunks.append(chunk_text)
 
-                # Start new chunk with this row (minimum 1 row guaranteed)
-                current_rows = [row]
-                current_size = row_size
+            # Start new chunk with this row (minimum 1 row guaranteed)
+            current_rows = [row]
+            current_size = row_size
         else:
             # Row fits - add to current chunk
             current_rows.append(row)
@@ -954,13 +1014,16 @@ def split_markdown_table_into_chunks(
             current_rows,
             chunk_index=len(chunks),
             total_chunks=max(len(chunks) + 1, estimated_chunks),
-            context_prefix=context_prefix
+            context_prefix=context_prefix,
+            preamble=preamble
         )
         chunks.append(chunk_text)
 
     # Update total chunk count in metadata if different from estimate
     if len(chunks) != estimated_chunks and len(chunks) > 1:
         chunks = update_markdown_chunk_metadata(chunks, len(chunks))
+    elif len(chunks) == 1 and estimated_chunks > 1:
+        chunks = [re.sub(r'\[Table Chunk \d+/\d+\]\n', '', chunks[0], count=1)]
 
     logger.info(f"Markdown table split into {len(chunks)} chunks (original: {len(parsed_table.original_text)} chars)")
 

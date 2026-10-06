@@ -32,6 +32,21 @@ SUPPORTED_IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff']
 UNSUPPORTED_IMAGE_EXTENSIONS = ['.emf', '.wmf']
 
 
+def _anchor_cell(img) -> str:
+    """Top-left cell of an openpyxl image anchor ("B2"), or "" if unknown.
+
+    ``str(img.anchor)`` raises for OneCellAnchor/TwoCellAnchor, which used to make
+    every sheet image fail and fall back to the whole-workbook image list.
+    """
+    try:
+        from openpyxl.utils import get_column_letter
+        marker = img.anchor._from
+        return f"{get_column_letter(marker.col + 1)}{marker.row + 1}"
+    except Exception:
+        anchor = getattr(img, "anchor", "")
+        return anchor if isinstance(anchor, str) else ""
+
+
 class ExcelImageProcessor(ImageProcessor):
     """
     Excel-specific image processor.
@@ -262,8 +277,7 @@ class ExcelImageProcessor(ImageProcessor):
                     try:
                         if hasattr(img, '_data') and callable(img._data):
                             img_data = img._data()
-                            anchor = str(img.anchor) if hasattr(img, 'anchor') else ""
-                            result.append((img_data, anchor))
+                            result.append((img_data, _anchor_cell(img)))
                     except Exception as e:
                         logger.debug(f"Error accessing image data: {e}")
 
